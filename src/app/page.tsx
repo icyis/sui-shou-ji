@@ -196,28 +196,28 @@ export default function Home() {
   }, [])
 
   useEffect(() => {
-    const handlePaste = async (e: ClipboardEvent) => {
-      const items = e.clipboardData?.items
-      if (!items) return
-      for (const item of items) {
-        if (item.type.startsWith('image/')) {
-          e.preventDefault()
-          const file = item.getAsFile()
-          if (file) {
-            try {
-              const base64 = await compressImage(file)
-              setImages(prev => [...prev, base64])
-              toast({ title: '图片已添加' })
-            } catch {
-              toast({ title: '图片处理失败', variant: 'destructive' })
-            }
+  const handlePaste = async (e: ClipboardEvent) => {
+    const items = e.clipboardData?.items
+    if (!items) return
+    for (const item of items) {
+      if (item.type.startsWith('image/')) {
+        e.preventDefault()
+        const file = item.getAsFile()
+        if (file) {
+          try {
+            const base64 = await compressImage(file)
+            setImages(prev => [...prev, base64])
+            toast({ title: '图片已添加' })
+          } catch {
+            toast({ title: '图片处理失败', variant: 'destructive' })
           }
         }
       }
     }
-    document.addEventListener('paste', handlePaste)
-    return () => document.removeEventListener('paste', handlePaste)
-  }, [toast])
+  }
+  document.addEventListener('paste', handlePaste)
+  return () => document.removeEventListener('paste', handlePaste)
+}, [toast])
 
   useEffect(() => {
     const checkReminders = () => {
@@ -306,20 +306,20 @@ export default function Home() {
   }, [])
 
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files
-    if (!files) return
-    for (const file of files) {
-      if (file.type.startsWith('image/')) {
-        try {
-          const base64 = await compressImage(file)
-          setImages(prev => [...prev, base64])
-        } catch {
-          toast({ title: '图片处理失败', variant: 'destructive' })
-        }
+  const files = e.target.files
+  if (!files) return
+  for (const file of files) {
+    if (file.type.startsWith('image/')) {
+      try {
+        const base64 = await compressImage(file)
+        setImages(prev => [...prev, base64])
+      } catch {
+        toast({ title: '图片处理失败', variant: 'destructive' })
       }
     }
-    if (fileInputRef.current) fileInputRef.current.value = ''
   }
+  if (fileInputRef.current) fileInputRef.current.value = ''
+}
 
   const handleSetReminder = async () => {
     const permission = await requestNotificationPermission()
