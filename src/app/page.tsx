@@ -296,12 +296,24 @@ export default function Home() {
     if (value.trim() && isUrl(value.trim())) setSelectedType('link')
   }, [])
 
-  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files; if (!files) return
+    const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files
+    if (!files) return
+    
     for (const file of files) {
-      if (file.type.startsWith('image/')) try { setImages(prev => [...prev, await compressImage(file)]) } catch { toast({ title: '图片处理失败', variant: 'destructive' }) }
+      if (file.type.startsWith('image/')) {
+        try {
+          const base64 = await compressImage(file)
+          setImages(prev => [...prev, base64])
+        } catch {
+          toast({ title: '图片处理失败', variant: 'destructive' })
+        }
+      }
     }
-    if (fileInputRef.current) fileInputRef.current.value = ''
+    
+    if (fileInputRef.current) {
+      fileInputRef.current.value = ''
+    }
   }
 
   const handleSetReminder = async () => {
