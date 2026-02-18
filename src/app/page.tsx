@@ -33,12 +33,12 @@ interface Note {
   isAiAnalyzed?: boolean
 }
 
-const noteTypes: { type: NoteType; label: string; icon: React.ReactNode; color: string; bgColor: string; borderColor: string }[] = [
-  { type: 'idea', label: '灵感', icon: <Lightbulb className="w-4 h-4" />, color: 'text-amber-500', bgColor: 'bg-amber-500/10 hover:bg-amber-500/20', borderColor: 'border-amber-500' },
-  { type: 'complaint', label: '牢骚', icon: <Frown className="w-4 h-4" />, color: 'text-red-500', bgColor: 'bg-red-500/10 hover:bg-red-500/20', borderColor: 'border-red-500' },
-  { type: 'confusion', label: '困惑', icon: <HelpCircle className="w-4 h-4" />, color: 'text-purple-500', bgColor: 'bg-purple-500/10 hover:bg-purple-500/20', borderColor: 'border-purple-500' },
-  { type: 'news', label: '资讯', icon: <Newspaper className="w-4 h-4" />, color: 'text-blue-500', bgColor: 'bg-blue-500/10 hover:bg-blue-500/20', borderColor: 'border-blue-500' },
-  { type: 'link', label: '链接', icon: <Link2 className="w-4 h-4" />, color: 'text-green-500', bgColor: 'bg-green-500/10 hover:bg-green-500/20', borderColor: 'border-green-500' },
+const noteTypes = [
+  { type: 'idea' as NoteType, label: '灵感', icon: <Lightbulb className="w-4 h-4" />, color: 'text-amber-500', bgColor: 'bg-amber-500/10 hover:bg-amber-500/20', borderColor: 'border-amber-500' },
+  { type: 'complaint' as NoteType, label: '牢骚', icon: <Frown className="w-4 h-4" />, color: 'text-red-500', bgColor: 'bg-red-500/10 hover:bg-red-500/20', borderColor: 'border-red-500' },
+  { type: 'confusion' as NoteType, label: '困惑', icon: <HelpCircle className="w-4 h-4" />, color: 'text-purple-500', bgColor: 'bg-purple-500/10 hover:bg-purple-500/20', borderColor: 'border-purple-500' },
+  { type: 'news' as NoteType, label: '资讯', icon: <Newspaper className="w-4 h-4" />, color: 'text-blue-500', bgColor: 'bg-blue-500/10 hover:bg-blue-500/20', borderColor: 'border-blue-500' },
+  { type: 'link' as NoteType, label: '链接', icon: <Link2 className="w-4 h-4" />, color: 'text-green-500', bgColor: 'bg-green-500/10 hover:bg-green-500/20', borderColor: 'border-green-500' },
 ]
 
 const getTypeConfig = (type: NoteType) => noteTypes.find(t => t.type === type) || noteTypes[0]
@@ -115,7 +115,7 @@ const exportToCSV = (notes: Note[]) => {
   const blob = new Blob(['\ufeff' + csvContent], { type: 'text/csv;charset=utf-8' })
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
-  a.href = url; a.download = `随手记_${new Date().toISOString().slice(0,10)}.csv`; a.click()
+  a.href = url; a.download = `sui-shou-ji_${new Date().toISOString().slice(0,10)}.csv`; a.click()
   URL.revokeObjectURL(url)
 }
 export default function Home() {
@@ -197,12 +197,21 @@ export default function Home() {
 
   useEffect(() => {
     const handlePaste = async (e: ClipboardEvent) => {
-      const items = e.clipboardData?.items; if (!items) return
+      const items = e.clipboardData?.items
+      if (!items) return
       for (const item of items) {
         if (item.type.startsWith('image/')) {
           e.preventDefault()
           const file = item.getAsFile()
-          if (file) try { setImages(prev => [...prev, await compressImage(file)]); toast({ title: '图片已添加' }) } catch { toast({ title: '图片处理失败', variant: 'destructive' }) }
+          if (file) {
+            try {
+              const base64 = await compressImage(file)
+              setImages(prev => [...prev, base64])
+              toast({ title: '图片已添加' })
+            } catch {
+              toast({ title: '图片处理失败', variant: 'destructive' })
+            }
+          }
         }
       }
     }
@@ -296,10 +305,9 @@ export default function Home() {
     if (value.trim() && isUrl(value.trim())) setSelectedType('link')
   }, [])
 
-    const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files
     if (!files) return
-    
     for (const file of files) {
       if (file.type.startsWith('image/')) {
         try {
@@ -310,10 +318,7 @@ export default function Home() {
         }
       }
     }
-    
-    if (fileInputRef.current) {
-      fileInputRef.current.value = ''
-    }
+    if (fileInputRef.current) fileInputRef.current.value = ''
   }
 
   const handleSetReminder = async () => {
