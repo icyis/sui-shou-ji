@@ -1,11 +1,11 @@
 'use client'
 
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { 
   Lightbulb, Frown, HelpCircle, Newspaper, Link2, Plus, X, Search, 
   Trash2, Edit3, Check, Moon, Sun, Sparkles, Image as ImageIcon, 
   Filter, XCircle, Bell, BellRing, Loader2, ChevronDown, ChevronUp, 
-  Wand2, Cloud, Download
+  Wand2, Cloud, Download, Calendar as CalendarIcon, List, ChevronLeft, ChevronRight
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
@@ -19,6 +19,7 @@ import { NotificationPermissionDialog } from '@/components/NotificationPermissio
 import { SyncDialog } from '@/components/SyncDialog'
 
 type NoteType = 'idea' | 'complaint' | 'confusion' | 'news' | 'link'
+type ViewMode = 'list' | 'calendar'
 
 interface Note {
   id: string
@@ -60,6 +61,11 @@ const formatTime = (dateStr: string): string => {
 const formatReminderTime = (dateStr: string): string => {
   const date = new Date(dateStr)
   return date.toLocaleDateString('zh-CN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+}
+
+const formatDateKey = (dateStr: string): string => {
+  const date = new Date(dateStr)
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
 }
 
 const isUrl = (text: string): boolean => {
@@ -118,6 +124,18 @@ const exportToCSV = (notes: Note[]) => {
   a.href = url; a.download = `sui-shou-ji_${new Date().toISOString().slice(0,10)}.csv`; a.click()
   URL.revokeObjectURL(url)
 }
+
+// 获取月份的天数
+const getDaysInMonth = (year: number, month: number) => {
+  return new Date(year, month + 1, 0).getDate()
+}
+
+// 获取月份第一天是星期几
+const getFirstDayOfMonth = (year: number, month: number) => {
+  return new Date(year, month, 1).getDay()
+}
+
+const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六']
 export default function Home() {
   const { toast } = useToast()
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -170,6 +188,14 @@ export default function Home() {
   const isInitialized = useRef(false)
   const reminderCheckRef = useRef<NodeJS.Timeout | null>(null)
 
+  // 视图模式
+  const [viewMode, setViewMode] = useState<ViewMode>('list')
+  const [currentMonth, setCurrentMonth] = useState(() => {
+    const now = new Date()
+    return { year: now.getFullYear(), month: now.getMonth() }
+  })
+  const [selectedDate, setSelectedDate] = useState<string | null>(null)
+
   useEffect(() => {
     if (isInitialized.current) localStorage.setItem(STORAGE_KEY, JSON.stringify(notes))
     else isInitialized.current = true
@@ -196,28 +222,28 @@ export default function Home() {
   }, [])
 
   useEffect(() => {
-  const handlePaste = async (e: ClipboardEvent) => {
-    const items = e.clipboardData?.items
-    if (!items) return
-    for (const item of items) {
-      if (item.type.startsWith('image/')) {
-        e.preventDefault()
-        const file = item.getAsFile()
-        if (file) {
-          try {
-            const base64 = await compressImage(file)
-            setImages(prev => [...prev, base64])
-            toast({ title: '图片已添加' })
-          } catch {
-            toast({ title: '图片处理失败', variant: 'destructive' })
+    const handlePaste = async (e: ClipboardEvent) => {
+      const items = e.clipboardData?.items
+      if (!items) return
+      for (const item of items) {
+        if (item.type.startsWith('image/')) {
+          e.preventDefault()
+          const file = item.getAsFile()
+          if (file) {
+            try {
+              const base64 = await compressImage(file)
+              setImages(prev => [...prev, base64])
+              toast({ title: '图片已添加' })
+            } catch {
+              toast({ title: '图片处理失败', variant: 'destructive' })
+            }
           }
         }
       }
     }
-  }
-  document.addEventListener('paste', handlePaste)
-  return () => document.removeEventListener('paste', handlePaste)
-}, [toast])
+    document.addEventListener('paste', handlePaste)
+    return () => document.removeEventListener('paste', handlePaste)
+  }, [toast])
 
   useEffect(() => {
     const checkReminders = () => {
@@ -306,20 +332,20 @@ export default function Home() {
   }, [])
 
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
-  const files = e.target.files
-  if (!files) return
-  for (const file of files) {
-    if (file.type.startsWith('image/')) {
-      try {
-        const base64 = await compressImage(file)
-        setImages(prev => [...prev, base64])
-      } catch {
-        toast({ title: '图片处理失败', variant: 'destructive' })
+    const files = e.target.files
+    if (!files) return
+    for (const file of files) {
+      if (file.type.startsWith('image/')) {
+        try {
+          const base64 = await compressImage(file)
+          setImages(prev => [...prev, base64])
+        } catch {
+          toast({ title: '图片处理失败', variant: 'destructive' })
+        }
       }
     }
+    if (fileInputRef.current) fileInputRef.current.value = ''
   }
-  if (fileInputRef.current) fileInputRef.current.value = ''
-}
 
   const handleSetReminder = async () => {
     const permission = await requestNotificationPermission()
@@ -364,12 +390,100 @@ export default function Home() {
     return note.content.toLowerCase().includes(query) || note.tags.some(tag => tag.toLowerCase().includes(query))
   })
 
+  // 获取有提醒的日期
+  const reminderDates = useMemo(() => {
+    const dates = new Map<string, Note[]>()
+    notes.forEach(note => {
+      if (note.reminderAt) {
+        const dateKey = formatDateKey(note.reminderAt)
+        if (!dates.has(dateKey)) dates.set(dateKey, [])
+        dates.get(dateKey)!.push(note)
+      }
+    })
+    return dates
+  }, [notes])
+
+  // 获取所有提醒（按日期排序）
+  const allReminders = useMemo(() => {
+    return notes
+      .filter(n => n.reminderAt)
+      .sort((a, b) => new Date(a.reminderAt!).getTime() - new Date(b.reminderAt!).getTime())
+  }, [notes])
+
   const pendingRemindersCount = notes.filter(n => n.reminderAt && new Date(n.reminderAt) > new Date()).length
 
   const handleKeyDown = (e: React.KeyboardEvent, isEdit = false) => {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); addTag(isEdit ? editTagInput : tagInput, isEdit) }
   }
-    return (
+
+  // 日历导航
+  const prevMonth = () => {
+    setCurrentMonth(prev => prev.month === 0 ? { year: prev.year - 1, month: 11 } : { year: prev.year, month: prev.month - 1 })
+  }
+  const nextMonth = () => {
+    setCurrentMonth(prev => prev.month === 11 ? { year: prev.year + 1, month: 0 } : { year: prev.year, month: prev.month + 1 })
+  }
+  const goToToday = () => {
+    const now = new Date()
+    setCurrentMonth({ year: now.getFullYear(), month: now.getMonth() })
+    setSelectedDate(formatDateKey(now.toISOString()))
+  }
+
+  // 渲染日历
+  const renderCalendar = () => {
+    const { year, month } = currentMonth
+    const daysInMonth = getDaysInMonth(year, month)
+    const firstDay = getFirstDayOfMonth(year, month)
+    const today = formatDateKey(new Date().toISOString())
+    
+    const days = []
+    
+    // 空白格子
+    for (let i = 0; i < firstDay; i++) {
+      days.push(<div key={`empty-${i}`} className="h-12 md:h-16" />)
+    }
+    
+    // 日期格子
+    for (let day = 1; day <= daysInMonth; day++) {
+      const dateKey = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`
+      const remindersOnDay = reminderDates.get(dateKey) || []
+      const isToday = dateKey === today
+      const isSelected = dateKey === selectedDate
+      
+      days.push(
+        <div
+          key={day}
+          onClick={() => setSelectedDate(dateKey)}
+          className={cn(
+            'h-12 md:h-16 p-1 rounded-lg cursor-pointer transition-all border-2',
+            isToday && 'border-violet-500 bg-violet-50 dark:bg-violet-950/30',
+            isSelected && !isToday && 'border-orange-500 bg-orange-50 dark:bg-orange-950/30',
+            !isToday && !isSelected && 'border-transparent hover:bg-slate-100 dark:hover:bg-slate-800'
+          )}
+        >
+          <div className={cn('text-sm font-medium', isToday && 'text-violet-600 dark:text-violet-400')}>
+            {day}
+          </div>
+          {remindersOnDay.length > 0 && (
+            <div className="flex gap-0.5 mt-0.5 flex-wrap">
+              {remindersOnDay.slice(0, 3).map((r, i) => (
+                <div key={i} className="w-1.5 h-1.5 rounded-full bg-orange-500" />
+              ))}
+              {remindersOnDay.length > 3 && (
+                <span className="text-[10px] text-orange-500">+{remindersOnDay.length - 3}</span>
+              )}
+            </div>
+          )}
+        </div>
+      )
+    }
+    
+    return days
+  }
+
+  // 获取选中日期的提醒
+  const selectedDateReminders = selectedDate ? (reminderDates.get(selectedDate) || []) : []
+      return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-slate-100 dark:from-slate-950 dark:via-slate-900 dark:to-slate-950 transition-colors duration-300">
       <div className="max-w-3xl mx-auto px-4 py-8">
         <header className="flex items-center justify-between mb-8">
@@ -390,7 +504,7 @@ export default function Home() {
               </Badge>
             )}
             {pendingRemindersCount > 0 && (
-              <Badge variant="outline" className="gap-1 px-2 py-1 cursor-pointer hover:bg-orange-50 dark:hover:bg-orange-950" onClick={() => setShowRemindersOnly(!showRemindersOnly)}>
+              <Badge variant="outline" className="gap-1 px-2 py-1 cursor-pointer hover:bg-orange-50 dark:hover:bg-orange-950" onClick={() => setViewMode('calendar')}>
                 <BellRing className="w-3.5 h-3.5 text-orange-500" />
                 <span className="text-orange-600 dark:text-orange-400">{pendingRemindersCount}</span>
               </Badge>
@@ -404,146 +518,286 @@ export default function Home() {
           </div>
         </header>
 
-        <div className="mb-6 space-y-3">
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
-            <Input placeholder="搜索内容或标签..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="pl-10 h-12 bg-white dark:bg-slate-800/50 border-slate-200 dark:border-slate-700 rounded-xl shadow-sm" />
-          </div>
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-sm text-slate-500 dark:text-slate-400 flex items-center gap-1"><Filter className="w-4 h-4" />筛选：</span>
-            <Button variant={showRemindersOnly ? 'default' : 'outline'} size="sm" onClick={() => setShowRemindersOnly(!showRemindersOnly)} className={cn('h-7 text-xs rounded-full gap-1', showRemindersOnly ? 'bg-orange-500 hover:bg-orange-600 text-white' : 'text-slate-600 dark:text-slate-400')}>
-              <Bell className="w-3.5 h-3.5" />待提醒{pendingRemindersCount > 0 && <span className="ml-0.5 bg-white/20 px-1.5 rounded-full">{pendingRemindersCount}</span>}
-            </Button>
-            <Button variant={filterType === null && !showRemindersOnly ? 'default' : 'outline'} size="sm" onClick={clearFilters} className={cn('h-7 text-xs rounded-full', filterType === null && !showRemindersOnly ? 'bg-slate-800 dark:bg-slate-200 text-white dark:text-slate-900' : 'text-slate-600 dark:text-slate-400')}>全部</Button>
-            {noteTypes.map(({ type, label, icon }) => (
-              <Button key={type} variant={filterType === type ? 'default' : 'outline'} size="sm" onClick={() => { setFilterType(type === filterType ? null : type); setShowRemindersOnly(false) }} className={cn('h-7 text-xs rounded-full gap-1', filterType === type ? 'bg-slate-800 dark:bg-slate-200 text-white dark:text-slate-900' : 'text-slate-600 dark:text-slate-400')}>{icon}{label}</Button>
-            ))}
-            {(filterType || showRemindersOnly) && <Button variant="ghost" size="sm" onClick={clearFilters} className="h-7 text-xs rounded-full text-slate-400 hover:text-slate-600"><XCircle className="w-4 h-4" />清除筛选</Button>}
-          </div>
+        {/* 视图切换 */}
+        <div className="flex items-center gap-2 mb-4">
+          <Button
+            variant={viewMode === 'list' ? 'default' : 'outline'}
+            size="sm"
+            onClick={() => setViewMode('list')}
+            className={cn('gap-1.5 rounded-full', viewMode === 'list' ? 'bg-slate-800 dark:bg-slate-200 text-white dark:text-slate-900' : '')}
+          >
+            <List className="w-4 h-4" />列表
+          </Button>
+          <Button
+            variant={viewMode === 'calendar' ? 'default' : 'outline'}
+            size="sm"
+            onClick={() => setViewMode('calendar')}
+            className={cn('gap-1.5 rounded-full', viewMode === 'calendar' ? 'bg-slate-800 dark:bg-slate-200 text-white dark:text-slate-900' : '')}
+          >
+            <CalendarIcon className="w-4 h-4" />日历
+          </Button>
         </div>
 
-        <Card className="mb-8 overflow-hidden border-0 shadow-lg shadow-slate-200/50 dark:shadow-none dark:border dark:border-slate-800">
-          <CardContent className="p-6">
-            <div className="flex flex-wrap gap-2 mb-4">
-              {noteTypes.map(({ type, label, icon, color, bgColor, borderColor }) => (
-                <Button key={type} variant="outline" size="sm" onClick={() => setSelectedType(type)} className={cn('h-9 gap-1.5 rounded-full transition-all border-2', selectedType === type ? `${bgColor} ${borderColor} ${color} font-medium` : 'bg-slate-100 dark:bg-slate-800 border-transparent text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700')}>
-                  {icon}<span>{label}</span>
-                </Button>
-              ))}
-              {aiTypeReason && <Badge variant="outline" className="gap-1 px-2 py-1 text-xs text-purple-600 dark:text-purple-400 border-purple-200 dark:border-purple-800"><Wand2 className="w-3 h-3" />AI识别: {aiTypeReason}</Badge>}
-            </div>
-            <Textarea ref={textareaRef} placeholder="写下你的想法... 可以直接粘贴图片！" value={content} onChange={(e) => handleContentChange(e.target.value)} className="min-h-24 resize-none border-0 bg-transparent focus-visible:ring-0 text-lg placeholder:text-slate-400 dark:placeholder:text-slate-500 p-0" />
-            {images.length > 0 && (
-              <div className="mt-4 flex flex-wrap gap-2">{images.map((img, index) => (
-                <div key={index} className="relative group">
-                  <img src={img} alt={`预览 ${index + 1}`} className="w-20 h-20 object-cover rounded-lg border border-slate-200 dark:border-slate-700" />
-                  <button onClick={() => setImages(prev => prev.filter((_, i) => i !== index))} className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-red-500 text-white rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"><X className="w-3 h-3" /></button>
-                </div>
-              ))}</div>
-            )}
-            <div className="mt-4 flex flex-wrap items-center gap-2">
-              {tags.map((tag) => (<Badge key={tag} variant="secondary" className="gap-1 px-2.5 py-1 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300">{tag}<X className="w-3 h-3 cursor-pointer hover:text-red-500 transition-colors" onClick={() => removeTag(tag)} /></Badge>))}
-              <Input placeholder="添加标签..." value={tagInput} onChange={(e) => setTagInput(e.target.value)} onKeyDown={(e) => handleKeyDown(e)} className="w-24 h-7 text-sm border-0 bg-slate-100 dark:bg-slate-800 rounded-full px-3 focus-visible:ring-0" />
-            </div>
-            {reminderTime && (
-              <div className="mt-3 flex items-center gap-2 p-2 bg-orange-50 dark:bg-orange-950/30 rounded-lg">
-                <Bell className="w-4 h-4 text-orange-500" />
-                <span className="text-sm text-orange-700 dark:text-orange-300">提醒时间：{formatReminderTime(reminderTime)}</span>
-                <Button variant="ghost" size="sm" onClick={() => setReminderTime('')} className="h-6 w-6 p-0 text-orange-500 hover:text-orange-700"><X className="w-3.5 h-3.5" /></Button>
+        {/* 列表视图 */}
+        {viewMode === 'list' && (
+          <>
+            <div className="mb-6 space-y-3">
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
+                <Input placeholder="搜索内容或标签..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="pl-10 h-12 bg-white dark:bg-slate-800/50 border-slate-200 dark:border-slate-700 rounded-xl shadow-sm" />
               </div>
-            )}
-            {aiSuggestion && (
-              <div className="mt-3 flex items-center gap-2 p-2 bg-purple-50 dark:bg-purple-950/30 rounded-lg">
-                <Sparkles className="w-4 h-4 text-purple-500" />
-                <span className="text-sm text-purple-700 dark:text-purple-300">AI建议：{aiSuggestion}</span>
-              </div>
-            )}
-            <div className="flex items-center justify-between mt-4 pt-4 border-t border-slate-100 dark:border-slate-800">
               <div className="flex items-center gap-2 flex-wrap">
-                <input ref={fileInputRef} type="file" accept="image/*" multiple onChange={handleFileSelect} className="hidden" />
-                <Button variant="ghost" size="sm" onClick={() => fileInputRef.current?.click()} className="gap-1.5 text-slate-500 hover:text-slate-700 dark:text-slate-400"><ImageIcon className="w-4 h-4" />图片</Button>
-                <Button variant="ghost" size="sm" onClick={handleSetReminder} className={cn('gap-1.5', reminderTime ? 'text-orange-500 hover:text-orange-600' : 'text-slate-500 hover:text-slate-700')}><Bell className="w-4 h-4" />{reminderTime ? '修改提醒' : '设置提醒'}</Button>
-                <input type="datetime-local" value={reminderTime} onChange={(e) => setReminderTime(e.target.value)} className="h-8 text-xs border border-slate-200 dark:border-slate-700 rounded-md px-2 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300" min={new Date().toISOString().slice(0, 16)} />
-                <Button variant="ghost" size="sm" onClick={analyzeContent} disabled={isAiAnalyzing || !content.trim()} className="gap-1.5 text-purple-500 hover:text-purple-600 hover:bg-purple-50 dark:hover:bg-purple-950">
-                  {isAiAnalyzing ? <><Loader2 className="w-4 h-4 animate-spin" />分析中</> : <><Wand2 className="w-4 h-4" />AI 分析</>}
+                <span className="text-sm text-slate-500 dark:text-slate-400 flex items-center gap-1"><Filter className="w-4 h-4" />筛选：</span>
+                <Button variant={showRemindersOnly ? 'default' : 'outline'} size="sm" onClick={() => setShowRemindersOnly(!showRemindersOnly)} className={cn('h-7 text-xs rounded-full gap-1', showRemindersOnly ? 'bg-orange-500 hover:bg-orange-600 text-white' : 'text-slate-600 dark:text-slate-400')}>
+                  <Bell className="w-3.5 h-3.5" />待提醒{pendingRemindersCount > 0 && <span className="ml-0.5 bg-white/20 px-1.5 rounded-full">{pendingRemindersCount}</span>}
                 </Button>
+                <Button variant={filterType === null && !showRemindersOnly ? 'default' : 'outline'} size="sm" onClick={clearFilters} className={cn('h-7 text-xs rounded-full', filterType === null && !showRemindersOnly ? 'bg-slate-800 dark:bg-slate-200 text-white dark:text-slate-900' : 'text-slate-600 dark:text-slate-400')}>全部</Button>
+                {noteTypes.map(({ type, label, icon }) => (
+                  <Button key={type} variant={filterType === type ? 'default' : 'outline'} size="sm" onClick={() => { setFilterType(type === filterType ? null : type); setShowRemindersOnly(false) }} className={cn('h-7 text-xs rounded-full gap-1', filterType === type ? 'bg-slate-800 dark:bg-slate-200 text-white dark:text-slate-900' : 'text-slate-600 dark:text-slate-400')}>{icon}{label}</Button>
+                ))}
+                {(filterType || showRemindersOnly) && <Button variant="ghost" size="sm" onClick={clearFilters} className="h-7 text-xs rounded-full text-slate-400 hover:text-slate-600"><XCircle className="w-4 h-4" />清除筛选</Button>}
               </div>
-              <Button onClick={addNote} disabled={!content.trim() && images.length === 0} className="gap-2 rounded-full px-6 bg-gradient-to-r from-violet-500 to-purple-600 hover:from-violet-600 hover:to-purple-700 shadow-lg shadow-purple-500/25">
-                <Plus className="w-4 h-4" /><span>记下来</span>
-              </Button>
             </div>
-          </CardContent>
-        </Card>
 
-        <div className="space-y-3">
-          {filteredNotes.length === 0 && (searchQuery || filterType || showRemindersOnly) && (
-            <div className="text-center py-12 text-slate-500 dark:text-slate-400">
-              {showRemindersOnly ? <><Bell className="w-12 h-12 mx-auto mb-3 opacity-30" /><p>暂无待提醒的记录</p></> : <><Search className="w-12 h-12 mx-auto mb-3 opacity-30" /><p>没有找到匹配的记录</p></>}
-              {(filterType || showRemindersOnly) && <Button variant="link" onClick={clearFilters} className="mt-2">清除筛选</Button>}
-            </div>
-          )}
-          {filteredNotes.length === 0 && !searchQuery && !filterType && !showRemindersOnly && notes.length === 0 && (
-            <div className="text-center py-12 text-slate-500 dark:text-slate-400">
-              <Sparkles className="w-12 h-12 mx-auto mb-3 opacity-30" />
-              <p>还没有记录，写下你的第一条吧~</p>
-              <p className="text-sm mt-2">💡 提示：可以直接 Ctrl+V 粘贴图片，点击「AI 分析」自动分类！</p>
-            </div>
-          )}
-          {filteredNotes.map((note) => {
-            const typeConfig = getTypeConfig(note.type)
-            const isEditing = editingId === note.id
-            const isSuggestionExpanded = expandedSuggestions.has(note.id)
-            return (
-              <Card key={note.id} className={cn('group transition-all duration-200 hover:shadow-md overflow-hidden', 'border-l-4', note.type === 'idea' && 'border-l-amber-500', note.type === 'complaint' && 'border-l-red-500', note.type === 'confusion' && 'border-l-purple-500', note.type === 'news' && 'border-l-blue-500', note.type === 'link' && 'border-l-green-500')}>
-                <CardContent className="p-4">
-                  {isEditing ? (
-                    <div className="space-y-3">
-                      <Textarea value={editContent} onChange={(e) => setEditContent(e.target.value)} className="min-h-20 resize-none" autoFocus />
-                      <div className="flex flex-wrap items-center gap-2">
-                        {editTags.map((tag) => (<Badge key={tag} variant="secondary" className="gap-1 px-2.5 py-1 rounded-full">{tag}<X className="w-3 h-3 cursor-pointer hover:text-red-500" onClick={() => removeTag(tag, true)} /></Badge>))}
-                        <Input placeholder="添加标签..." value={editTagInput} onChange={(e) => setEditTagInput(e.target.value)} onKeyDown={(e) => handleKeyDown(e, true)} className="w-24 h-7 text-sm border-0 bg-slate-100 dark:bg-slate-800 rounded-full px-3" />
-                      </div>
-                      <div className="flex gap-2 justify-end">
-                        <Button variant="ghost" size="sm" onClick={cancelEdit}>取消</Button>
-                        <Button size="sm" onClick={() => saveEdit(note.id)} className="gap-1"><Check className="w-4 h-4" />保存</Button>
-                      </div>
+            <Card className="mb-8 overflow-hidden border-0 shadow-lg shadow-slate-200/50 dark:shadow-none dark:border dark:border-slate-800">
+              <CardContent className="p-6">
+                <div className="flex flex-wrap gap-2 mb-4">
+                  {noteTypes.map(({ type, label, icon, color, bgColor, borderColor }) => (
+                    <Button key={type} variant="outline" size="sm" onClick={() => setSelectedType(type)} className={cn('h-9 gap-1.5 rounded-full transition-all border-2', selectedType === type ? `${bgColor} ${borderColor} ${color} font-medium` : 'bg-slate-100 dark:bg-slate-800 border-transparent text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700')}>
+                      {icon}<span>{label}</span>
+                    </Button>
+                  ))}
+                  {aiTypeReason && <Badge variant="outline" className="gap-1 px-2 py-1 text-xs text-purple-600 dark:text-purple-400 border-purple-200 dark:border-purple-800"><Wand2 className="w-3 h-3" />AI识别: {aiTypeReason}</Badge>}
+                </div>
+                <Textarea ref={textareaRef} placeholder="写下你的想法... 可以直接粘贴图片！" value={content} onChange={(e) => handleContentChange(e.target.value)} className="min-h-24 resize-none border-0 bg-transparent focus-visible:ring-0 text-lg placeholder:text-slate-400 dark:placeholder:text-slate-500 p-0" />
+                {images.length > 0 && (
+                  <div className="mt-4 flex flex-wrap gap-2">{images.map((img, index) => (
+                    <div key={index} className="relative group">
+                      <img src={img} alt={`预览 ${index + 1}`} className="w-20 h-20 object-cover rounded-lg border border-slate-200 dark:border-slate-700" />
+                      <button onClick={() => setImages(prev => prev.filter((_, i) => i !== index))} className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-red-500 text-white rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"><X className="w-3 h-3" /></button>
                     </div>
-                  ) : (
-                    <>
-                      <div className="flex items-start justify-between gap-3 mb-2">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <Badge variant="outline" className={cn('gap-1 px-2.5 py-1 rounded-full border', typeConfig.color, typeConfig.bgColor, typeConfig.borderColor)}>{typeConfig.icon}<span>{typeConfig.label}</span></Badge>
-                          {note.isAiAnalyzed && <Badge variant="outline" className="gap-1 px-1.5 py-0.5 text-[10px] text-purple-500 border-purple-200 dark:border-purple-800"><Wand2 className="w-2.5 h-2.5" />AI</Badge>}
-                          <span className="text-xs text-slate-400 dark:text-slate-500">{formatTime(note.createdAt)}</span>
-                          {note.reminderAt && <Badge variant="outline" className="gap-1 px-2 py-0.5 text-xs text-orange-600 dark:text-orange-400 border-orange-200 dark:border-orange-800"><Bell className="w-3 h-3" />{formatReminderTime(note.reminderAt)}</Badge>}
+                  ))}</div>
+                )}
+                <div className="mt-4 flex flex-wrap items-center gap-2">
+                  {tags.map((tag) => (<Badge key={tag} variant="secondary" className="gap-1 px-2.5 py-1 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300">{tag}<X className="w-3 h-3 cursor-pointer hover:text-red-500 transition-colors" onClick={() => removeTag(tag)} /></Badge>))}
+                  <Input placeholder="添加标签..." value={tagInput} onChange={(e) => setTagInput(e.target.value)} onKeyDown={(e) => handleKeyDown(e)} className="w-24 h-7 text-sm border-0 bg-slate-100 dark:bg-slate-800 rounded-full px-3 focus-visible:ring-0" />
+                </div>
+                {reminderTime && (
+                  <div className="mt-3 flex items-center gap-2 p-2 bg-orange-50 dark:bg-orange-950/30 rounded-lg">
+                    <Bell className="w-4 h-4 text-orange-500" />
+                    <span className="text-sm text-orange-700 dark:text-orange-300">提醒时间：{formatReminderTime(reminderTime)}</span>
+                    <Button variant="ghost" size="sm" onClick={() => setReminderTime('')} className="h-6 w-6 p-0 text-orange-500 hover:text-orange-700"><X className="w-3.5 h-3.5" /></Button>
+                  </div>
+                )}
+                {aiSuggestion && (
+                  <div className="mt-3 flex items-center gap-2 p-2 bg-purple-50 dark:bg-purple-950/30 rounded-lg">
+                    <Sparkles className="w-4 h-4 text-purple-500" />
+                    <span className="text-sm text-purple-700 dark:text-purple-300">AI建议：{aiSuggestion}</span>
+                  </div>
+                )}
+                <div className="flex items-center justify-between mt-4 pt-4 border-t border-slate-100 dark:border-slate-800">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <input ref={fileInputRef} type="file" accept="image/*" multiple onChange={handleFileSelect} className="hidden" />
+                    <Button variant="ghost" size="sm" onClick={() => fileInputRef.current?.click()} className="gap-1.5 text-slate-500 hover:text-slate-700 dark:text-slate-400"><ImageIcon className="w-4 h-4" />图片</Button>
+                    <Button variant="ghost" size="sm" onClick={handleSetReminder} className={cn('gap-1.5', reminderTime ? 'text-orange-500 hover:text-orange-600' : 'text-slate-500 hover:text-slate-700')}><Bell className="w-4 h-4" />{reminderTime ? '修改提醒' : '设置提醒'}</Button>
+                    <input type="datetime-local" value={reminderTime} onChange={(e) => setReminderTime(e.target.value)} className="h-8 text-xs border border-slate-200 dark:border-slate-700 rounded-md px-2 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300" min={new Date().toISOString().slice(0, 16)} />
+                    <Button variant="ghost" size="sm" onClick={analyzeContent} disabled={isAiAnalyzing || !content.trim()} className="gap-1.5 text-purple-500 hover:text-purple-600 hover:bg-purple-50 dark:hover:bg-purple-950">
+                      {isAiAnalyzing ? <><Loader2 className="w-4 h-4 animate-spin" />分析中</> : <><Wand2 className="w-4 h-4" />AI 分析</>}
+                    </Button>
+                  </div>
+                  <Button onClick={addNote} disabled={!content.trim() && images.length === 0} className="gap-2 rounded-full px-6 bg-gradient-to-r from-violet-500 to-purple-600 hover:from-violet-600 hover:to-purple-700 shadow-lg shadow-purple-500/25">
+                    <Plus className="w-4 h-4" /><span>记下来</span>
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+
+            <div className="space-y-3">
+              {filteredNotes.length === 0 && (searchQuery || filterType || showRemindersOnly) && (
+                <div className="text-center py-12 text-slate-500 dark:text-slate-400">
+                  {showRemindersOnly ? <><Bell className="w-12 h-12 mx-auto mb-3 opacity-30" /><p>暂无待提醒的记录</p></> : <><Search className="w-12 h-12 mx-auto mb-3 opacity-30" /><p>没有找到匹配的记录</p></>}
+                  {(filterType || showRemindersOnly) && <Button variant="link" onClick={clearFilters} className="mt-2">清除筛选</Button>}
+                </div>
+              )}
+              {filteredNotes.length === 0 && !searchQuery && !filterType && !showRemindersOnly && notes.length === 0 && (
+                <div className="text-center py-12 text-slate-500 dark:text-slate-400">
+                  <Sparkles className="w-12 h-12 mx-auto mb-3 opacity-30" />
+                  <p>还没有记录，写下你的第一条吧~</p>
+                </div>
+              )}
+              {filteredNotes.map((note) => {
+                const typeConfig = getTypeConfig(note.type)
+                const isEditing = editingId === note.id
+                const isSuggestionExpanded = expandedSuggestions.has(note.id)
+                return (
+                  <Card key={note.id} className={cn('group transition-all duration-200 hover:shadow-md overflow-hidden', 'border-l-4', note.type === 'idea' && 'border-l-amber-500', note.type === 'complaint' && 'border-l-red-500', note.type === 'confusion' && 'border-l-purple-500', note.type === 'news' && 'border-l-blue-500', note.type === 'link' && 'border-l-green-500')}>
+                    <CardContent className="p-4">
+                      {isEditing ? (
+                        <div className="space-y-3">
+                          <Textarea value={editContent} onChange={(e) => setEditContent(e.target.value)} className="min-h-20 resize-none" autoFocus />
+                          <div className="flex flex-wrap items-center gap-2">
+                            {editTags.map((tag) => (<Badge key={tag} variant="secondary" className="gap-1 px-2.5 py-1 rounded-full">{tag}<X className="w-3 h-3 cursor-pointer hover:text-red-500" onClick={() => removeTag(tag, true)} /></Badge>))}
+                            <Input placeholder="添加标签..." value={editTagInput} onChange={(e) => setEditTagInput(e.target.value)} onKeyDown={(e) => handleKeyDown(e, true)} className="w-24 h-7 text-sm border-0 bg-slate-100 dark:bg-slate-800 rounded-full px-3" />
+                          </div>
+                          <div className="flex gap-2 justify-end">
+                            <Button variant="ghost" size="sm" onClick={cancelEdit}>取消</Button>
+                            <Button size="sm" onClick={() => saveEdit(note.id)} className="gap-1"><Check className="w-4 h-4" />保存</Button>
+                          </div>
                         </div>
-                        <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                          <Button variant="ghost" size="icon" onClick={() => startEdit(note)} className="h-8 w-8 text-slate-400 hover:text-blue-500"><Edit3 className="w-4 h-4" /></Button>
-                          <Button variant="ghost" size="icon" onClick={() => deleteNote(note.id)} className="h-8 w-8 text-slate-400 hover:text-red-500"><Trash2 className="w-4 h-4" /></Button>
-                        </div>
-                      </div>
-                      {note.images && note.images.length > 0 && <div className="flex flex-wrap gap-2 mb-3">{note.images.map((img, index) => <img key={index} src={img} alt={`图片 ${index + 1}`} className="max-w-full h-auto rounded-lg border border-slate-200 dark:border-slate-700 max-h-48 object-cover" />)}</div>}
-                      {note.content && <p className="text-slate-700 dark:text-slate-300 break-words leading-relaxed">{note.content}</p>}
-                      {note.tags.length > 0 && <div className="flex flex-wrap gap-1.5 mt-3">{note.tags.map((tag) => <Badge key={tag} variant="outline" className="text-xs px-2 py-0.5 rounded-full text-slate-500 dark:text-slate-400 border-slate-200 dark:border-slate-700">#{tag}</Badge>)}</div>}
-                      {note.aiSuggestion && (
-                        <div className="mt-3">
-                          <button onClick={() => toggleSuggestion(note.id)} className="flex items-center gap-1 text-xs text-purple-500 hover:text-purple-600 transition-colors">
-                            <Sparkles className="w-3 h-3" />AI 建议{isSuggestionExpanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
-                          </button>
-                          {isSuggestionExpanded && <p className="mt-1 text-sm text-purple-600 dark:text-purple-400 bg-purple-50 dark:bg-purple-950/30 rounded-lg p-2">{note.aiSuggestion}</p>}
-                        </div>
+                      ) : (
+                        <>
+                          <div className="flex items-start justify-between gap-3 mb-2">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <Badge variant="outline" className={cn('gap-1 px-2.5 py-1 rounded-full border', typeConfig.color, typeConfig.bgColor, typeConfig.borderColor)}>{typeConfig.icon}<span>{typeConfig.label}</span></Badge>
+                              {note.isAiAnalyzed && <Badge variant="outline" className="gap-1 px-1.5 py-0.5 text-[10px] text-purple-500 border-purple-200 dark:border-purple-800"><Wand2 className="w-2.5 h-2.5" />AI</Badge>}
+                              <span className="text-xs text-slate-400 dark:text-slate-500">{formatTime(note.createdAt)}</span>
+                              {note.reminderAt && <Badge variant="outline" className="gap-1 px-2 py-0.5 text-xs text-orange-600 dark:text-orange-400 border-orange-200 dark:border-orange-800"><Bell className="w-3 h-3" />{formatReminderTime(note.reminderAt)}</Badge>}
+                            </div>
+                            <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                              <Button variant="ghost" size="icon" onClick={() => startEdit(note)} className="h-8 w-8 text-slate-400 hover:text-blue-500"><Edit3 className="w-4 h-4" /></Button>
+                              <Button variant="ghost" size="icon" onClick={() => deleteNote(note.id)} className="h-8 w-8 text-slate-400 hover:text-red-500"><Trash2 className="w-4 h-4" /></Button>
+                            </div>
+                          </div>
+                          {note.images && note.images.length > 0 && <div className="flex flex-wrap gap-2 mb-3">{note.images.map((img, index) => <img key={index} src={img} alt={`图片 ${index + 1}`} className="max-w-full h-auto rounded-lg border border-slate-200 dark:border-slate-700 max-h-48 object-cover" />)}</div>}
+                          {note.content && <p className="text-slate-700 dark:text-slate-300 break-words leading-relaxed">{note.content}</p>}
+                          {note.tags.length > 0 && <div className="flex flex-wrap gap-1.5 mt-3">{note.tags.map((tag) => <Badge key={tag} variant="outline" className="text-xs px-2 py-0.5 rounded-full text-slate-500 dark:text-slate-400 border-slate-200 dark:border-slate-700">#{tag}</Badge>)}</div>}
+                          {note.aiSuggestion && (
+                            <div className="mt-3">
+                              <button onClick={() => toggleSuggestion(note.id)} className="flex items-center gap-1 text-xs text-purple-500 hover:text-purple-600 transition-colors">
+                                <Sparkles className="w-3 h-3" />AI 建议{isSuggestionExpanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                              </button>
+                              {isSuggestionExpanded && <p className="mt-1 text-sm text-purple-600 dark:text-purple-400 bg-purple-50 dark:bg-purple-950/30 rounded-lg p-2">{note.aiSuggestion}</p>}
+                            </div>
+                          )}
+                        </>
                       )}
-                    </>
+                    </CardContent>
+                  </Card>
+                )
+              })}
+            </div>
+            {notes.length > 0 && <div className="mt-8 text-center text-sm text-slate-400 dark:text-slate-500">共 {notes.length} 条记录{(searchQuery || filterType) && ` · 筛选到 ${filteredNotes.length} 条`}</div>}
+          </>
+        )}
+
+        {/* 日历视图 */}
+        {viewMode === 'calendar' && (
+          <div className="space-y-6">
+            {/* 日历 */}
+            <Card className="overflow-hidden border-0 shadow-lg shadow-slate-200/50 dark:shadow-none dark:border dark:border-slate-800">
+              <CardContent className="p-4">
+                {/* 日历头部 */}
+                <div className="flex items-center justify-between mb-4">
+                  <Button variant="ghost" size="icon" onClick={prevMonth}><ChevronLeft className="w-5 h-5" /></Button>
+                  <div className="flex items-center gap-3">
+                    <h2 className="text-lg font-semibold text-slate-800 dark:text-slate-100">
+                      {currentMonth.year}年{currentMonth.month + 1}月
+                    </h2>
+                    <Button variant="outline" size="sm" onClick={goToToday} className="h-7 text-xs">今天</Button>
+                  </div>
+                  <Button variant="ghost" size="icon" onClick={nextMonth}><ChevronRight className="w-5 h-5" /></Button>
+                </div>
+                
+                {/* 星期标题 */}
+                <div className="grid grid-cols-7 gap-1 mb-2">
+                  {WEEKDAYS.map((day, i) => (
+                    <div key={day} className={cn('h-8 flex items-center justify-center text-sm font-medium', i === 0 || i === 6 ? 'text-red-500' : 'text-slate-500 dark:text-slate-400')}>
+                      {day}
+                    </div>
+                  ))}
+                </div>
+                
+                {/* 日期格子 */}
+                <div className="grid grid-cols-7 gap-1">
+                  {renderCalendar()}
+                </div>
+                
+                {/* 图例 */}
+                <div className="flex items-center gap-4 mt-4 text-xs text-slate-500 dark:text-slate-400">
+                  <div className="flex items-center gap-1">
+                    <div className="w-1.5 h-1.5 rounded-full bg-orange-500" />
+                    <span>有提醒</span>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <div className="w-3 h-3 rounded border-2 border-violet-500" />
+                    <span>今天</span>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* 选中日期的提醒 */}
+            {selectedDate && (
+              <Card className="overflow-hidden border-0 shadow-lg shadow-slate-200/50 dark:shadow-none dark:border dark:border-slate-800">
+                <CardContent className="p-4">
+                  <h3 className="text-lg font-semibold text-slate-800 dark:text-slate-100 mb-3">
+                    {selectedDate} 的提醒
+                  </h3>
+                  {selectedDateReminders.length === 0 ? (
+                    <p className="text-slate-500 dark:text-slate-400 text-sm">这一天没有提醒</p>
+                  ) : (
+                    <div className="space-y-2">
+                      {selectedDateReminders.map((note) => (
+                        <div key={note.id} className="flex items-start gap-3 p-3 bg-slate-50 dark:bg-slate-800/50 rounded-lg">
+                          <div className="flex-1">
+                            <p className="text-slate-700 dark:text-slate-300">{note.content}</p>
+                            <div className="flex items-center gap-2 mt-1">
+                              <Badge variant="outline" className="text-xs text-orange-500 border-orange-200 dark:border-orange-800">
+                                <Bell className="w-3 h-3 mr-1" />
+                                {new Date(note.reminderAt!).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}
+                              </Badge>
+                              {note.tags.map((tag) => (
+                                <Badge key={tag} variant="outline" className="text-xs text-slate-500">#{tag}</Badge>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
                   )}
                 </CardContent>
               </Card>
-            )
-          })}
-        </div>
-        {notes.length > 0 && <div className="mt-8 text-center text-sm text-slate-400 dark:text-slate-500">共 {notes.length} 条记录{(searchQuery || filterType) && ` · 筛选到 ${filteredNotes.length} 条`}</div>}
+            )}
+
+            {/* 所有提醒汇总 */}
+            <Card className="overflow-hidden border-0 shadow-lg shadow-slate-200/50 dark:shadow-none dark:border dark:border-slate-800">
+              <CardContent className="p-4">
+                <h3 className="text-lg font-semibold text-slate-800 dark:text-slate-100 mb-3">
+                  📋 提醒汇总 ({allReminders.length}条)
+                </h3>
+                {allReminders.length === 0 ? (
+                  <p className="text-slate-500 dark:text-slate-400 text-sm">还没有设置任何提醒</p>
+                ) : (
+                  <div className="space-y-2 max-h-64 overflow-y-auto">
+                    {allReminders.map((note) => {
+                      const isPast = new Date(note.reminderAt!) < new Date()
+                      return (
+                        <div key={note.id} className={cn('flex items-start gap-3 p-3 rounded-lg', isPast ? 'bg-slate-100 dark:bg-slate-800/30 opacity-60' : 'bg-orange-50 dark:bg-orange-950/30')}>
+                          <div className="flex-1">
+                            <p className="text-slate-700 dark:text-slate-300">{note.content}</p>
+                            <div className="flex items-center gap-2 mt-1">
+                              <Badge variant="outline" className={cn('text-xs', isPast ? 'text-slate-400' : 'text-orange-500 border-orange-200 dark:border-orange-800')}>
+                                <Bell className="w-3 h-3 mr-1" />
+                                {formatReminderTime(note.reminderAt!)}
+                                {isPast && ' (已过期)'}
+                              </Badge>
+                            </div>
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+        )}
       </div>
       <SyncDialog open={showSyncDialog} onOpenChange={setShowSyncDialog} syncCode={syncCode} onSyncCodeChange={setSyncCode} onSyncUp={syncUp} onSyncDown={syncDown} onCreateSyncCode={createSyncCode} isSyncing={isSyncing} lastSyncTime={lastSyncTime} />
       <NotificationPermissionDialog open={showNotificationDialog} onOpenChange={setShowNotificationDialog} />
     </div>
   )
 }
+
+// 添加 useMemo 导入
+import { useMemo } from 'react'
