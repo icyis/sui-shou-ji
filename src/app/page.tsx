@@ -29,6 +29,7 @@ interface Note {
   images: string[]
   createdAt: string
   reminderAt?: string
+  reminderTriggered?: boolean  // 新增：提醒是否已触发
   aiSuggestion?: string
   aiTypeReason?: string
   isAiAnalyzed?: boolean
