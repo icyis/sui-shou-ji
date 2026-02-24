@@ -255,7 +255,8 @@ export default function Home() {
           const diff = Math.abs(reminderDate.getTime() - now.getTime())
           if (diff < 60000 && reminderDate <= now) {
             sendNotification('⏰ 提醒', note.content.slice(0, 50) + (note.content.length > 50 ? '...' : ''))
-            setNotes(prev => prev.map(n => n.id === note.id ? { ...n, reminderAt: undefined } : n))
+            setNotes(prev => prev.map(n => n.id === note.id ? { ...n, reminderTriggered: true } : n
+))
           }
         }
       })
@@ -393,23 +394,23 @@ export default function Home() {
 
   // 获取有提醒的日期
   const reminderDates = useMemo(() => {
-    const dates = new Map<string, Note[]>()
-    notes.forEach(note => {
-      if (note.reminderAt) {
-        const dateKey = formatDateKey(note.reminderAt)
-        if (!dates.has(dateKey)) dates.set(dateKey, [])
-        dates.get(dateKey)!.push(note)
-      }
-    })
-    return dates
-  }, [notes])
+  const dates = new Map<string, Note[]>()
+  notes.forEach(note => {
+    if (note.reminderAt) {
+      const dateKey = formatDateKey(note.reminderAt)
+      if (!dates.has(dateKey)) dates.set(dateKey, [])
+      dates.get(dateKey)!.push(note)
+    }
+  })
+  return dates
+}, [notes])
 
   // 获取所有提醒（按日期排序）
   const allReminders = useMemo(() => {
-    return notes
-      .filter(n => n.reminderAt)
-      .sort((a, b) => new Date(a.reminderAt!).getTime() - new Date(b.reminderAt!).getTime())
-  }, [notes])
+  return notes
+    .filter(n => n.reminderAt)
+    .sort((a, b) => new Date(a.reminderAt!).getTime() - new Date(b.reminderAt!).getTime())
+}, [notes])
 
   const pendingRemindersCount = notes.filter(n => n.reminderAt && new Date(n.reminderAt) > new Date()).length
 
@@ -771,7 +772,7 @@ export default function Home() {
                 ) : (
                   <div className="space-y-2 max-h-64 overflow-y-auto">
                     {allReminders.map((note) => {
-                      const isPast = new Date(note.reminderAt!) < new Date()
+                     const isPast = note.reminderTriggered || new Date(note.reminderAt!) < new Date()
                       return (
                         <div key={note.id} className={cn('flex items-start gap-3 p-3 rounded-lg', isPast ? 'bg-slate-100 dark:bg-slate-800/30 opacity-60' : 'bg-orange-50 dark:bg-orange-950/30')}>
                           <div className="flex-1">
