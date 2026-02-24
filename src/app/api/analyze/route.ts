@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
-import ZAI from 'z-ai-web-dev-sdk'
 
 export interface AnalyzeResponse {
-  type: 'idea' | 'complaint' | 'confusion' | 'news' | 'link'
+  type: 'idea' | 'complaint' | 'news' | 'link' | 'confusion'
   typeReason: string
   tags: string[]
   suggestions: string
@@ -17,64 +16,61 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: '内容不能为空' }, { status: 400 })
     }
 
-    const zai = await ZAI.create()
+    const text = content.trim()
+    const textLower = text.toLowerCase()
+    
+    let type: AnalyzeResponse['type'] = 'idea'
+    let typeReason = '自动识别'
+    
+    // 检测链接
+    if (textLower.includes('http://') || textLower.includes('https://') || textLower.includes('www.') || /^https?:\/\//.test(text)) {
+      type = 'link'
+      typeReason = '包含链接'
+    }
+    // 检测牢骚/负面情绪
+    else if (/烦|气死|怒|讨厌|吐槽|抱怨|累死|压力|崩溃|郁闷|无语|愤怒|恶心|心累/.test(text)) {
+      type = 'complaint'
+      typeReason = '情绪表达'
+    }
+    // 检测困惑/问题
+    else if (/\?|？|怎么|为什么|如何|什么|求助|不懂|困惑|疑问|请教|怎么办|咋办|能不能|可以吗/.test(text)) {
+      type = 'confusion'
+      typeReason = '疑问句式'
+    }
+    // 检测资讯/新闻
+    else if (/新闻|报道|文章|教程|学习|发现|推荐|分享|阅读|笔记|摘录|资料|干货/.test(text)) {
+      type = 'news'
+      typeReason = '资讯内容'
+    }
+    // 默认灵感
+    else {
+      type = 'idea'
+      typeReason = '灵感记录'
+    }
 
-    const completion = await zai.chat.completions.create({
-      messages: [
-        {
-          role: 'system',
-          content: `你是一个智能内容分类助手。分析用户输入的内容，返回 JSON 格式（只返回 JSON）：
-{
-  "type": "idea|complaint|confusion|news|link",
-  "typeReason": "简短理由（5字以内）",
-  "tags": ["标签1", "标签2", "标签3"],
-  "suggestions": "实用建议（30字以内）"
-}
+    // 提取标签
+    const tags: string[] = []
+    const keywords = text.match(/[\u4e00-\u9fa5]{2,4}/g) || []
+    const uniqueKeywords = [...new Set(keywords)].slice(0, 3)
+    tags.push(...uniqueKeywords)
 
-类型判断规则（按优先级）：
-1. link(链接)：包含 http/https 开头的网址
-2. complaint(牢骚)：表达不满、抱怨、吐槽、负面情绪
-3. confusion(困惑)：提出问题、困惑、求助
-4. news(资讯)：新闻标题、文章摘要、知识要点
-5. idea(灵感)：创意想法、灵感记录、新点子、计划
+    // 根据类型给出建议
+    const suggestions: Record<string, string> = {
+      idea: '这是个好想法，可以进一步细化行动计划',
+      complaint: '记录情绪是很好的释放方式，保持积极心态',
+      confusion: '可以把问题拆解成小问题逐一解决',
+      news: '值得收藏，后续可以深入学习',
+      link: '记得设置提醒，稍后细读'
+    }
 
-标签提取规则：
-- 提取 3-5 个关键词
-- 标签简洁（2-6个字）
-- 关注：主题词、动作词、领域词`
-        },
-        { role: 'user', content: content.trim() }
-      ],
-      temperature: 0.3,
+    return NextResponse.json({
+      type,
+      typeReason,
+      tags,
+      suggestions: suggestions[type]
     })
-
-    const aiResponse = completion.choices[0]?.message?.content
-
-    if (!aiResponse) {
-      throw new Error('AI 未返回有效响应')
-    }
-
-    let jsonStr = aiResponse.trim()
-    if (jsonStr.startsWith('```json')) jsonStr = jsonStr.slice(7)
-    else if (jsonStr.startsWith('```')) jsonStr = jsonStr.slice(3)
-    if (jsonStr.endsWith('```')) jsonStr = jsonStr.slice(0, -3)
-
-    const analysisResult: AnalyzeResponse = JSON.parse(jsonStr.trim())
-
-    const validTypes = ['idea', 'complaint', 'confusion', 'news', 'link']
-    if (!validTypes.includes(analysisResult.type)) {
-      analysisResult.type = 'idea'
-    }
-    if (!Array.isArray(analysisResult.tags)) analysisResult.tags = []
-    if (!analysisResult.typeReason) analysisResult.typeReason = '自动分类'
-    if (!analysisResult.suggestions) analysisResult.suggestions = '这是一条有价值的记录'
-
-    return NextResponse.json(analysisResult)
   } catch (error) {
-    console.error('AI 分析错误:', error)
-    return NextResponse.json(
-      { error: 'AI 分析失败，请稍后重试' },
-      { status: 500 }
-    )
+    console.error('分析错误:', error)
+    return NextResponse.json({ error: '分析失败' }, { status: 500 })
   }
 }
